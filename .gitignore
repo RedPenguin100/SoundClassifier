@@ -132,3 +132,6 @@ dmypy.json
 .idea/
 # Data for model
 data/
+UrbanSound8K/
+# Product files for model
+retrain_imagenet_classifier/spectrograms/
