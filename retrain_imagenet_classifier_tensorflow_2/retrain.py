@@ -8,6 +8,8 @@ import numpy as np
 import sys
 import PIL.Image as Image
 
+from retrain_imagenet_classifier_tensorflow_2.sound_to_image import wav_to_spectogram
+
 
 class CollectBatchStats(tf.keras.callbacks.Callback):
     def __init__(self):
@@ -40,6 +42,11 @@ if __name__ == '__main__':
     should_load = sys.argv[1] == 'load'
     fix_gpu()
 
+    # Audio to spectogram
+    wav_path = '..\\UrbanSound8K\\audio\\fold1\\7061-6-0-0.wav'
+    spectogram_path = '7061-6-0-0.png'
+    wav_to_spectogram(wav_path=wav_path, spectogram_path=spectogram_path)
+
     # Obtain data to memory.
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
     image_data = image_generator.flow_from_directory(str(DATA_ROOT), target_size=IMAGE_SHAPE)
@@ -67,64 +74,34 @@ if __name__ == '__main__':
 
         batch_stats_callback = CollectBatchStats()
 
-        history = model.fit_generator(image_data, epochs=2,
+        model.fit_generator(image_data, epochs=2,
                                       steps_per_epoch=steps_per_epoch,
                                       callbacks=[batch_stats_callback])
-
-        plt.figure()
-        plt.ylabel('Loss')
-        plt.xlabel('Training Steps')
-        plt.ylim([0, 2])
-        plt.plot(batch_stats_callback.batch_losses)
-
-        plt.figure()
-        plt.ylabel('Accuracy')
-        plt.xlabel('Training Steps')
-        plt.ylim([0, 1])
-        plt.plot(batch_stats_callback.batch_acc)
-
-        plt.show()
-
-        class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
-        class_names = np.array([key.title() for key, value in class_names])
-        print(class_names)
-
-        predicted_batch = model.predict(image_batch)
-        predicted_id = np.argmax(predicted_batch, axis=-1)
-        predicted_label_batch = class_names[predicted_id]
-
-        label_id = np.argmax(label_batch, axis=-1)
-        plt.figure(figsize=(10, 9))
-        plt.subplots_adjust(hspace=0.5)
-        for n in range(30):
-            plt.subplot(6, 5, n + 1)
-            plt.imshow(image_batch[n])
-            color = 'green' if predicted_id[n] == label_id[n] else 'red'
-            plt.title(predicted_label_batch[n].title(), color=color)
-            plt.axis('off')
-        _ = plt.suptitle('Model predictions (green: correct, red: incorrect)')
-        plt.show()
-
         model.save(EXPORT_PATH, save_format='tf')
     else:
         model = tf.keras.models.load_model(EXPORT_PATH)
 
-        class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
-        class_names = np.array([key.title() for key, value in class_names])
-        print(class_names)
-        predicted_batch = model.predict(image_batch)
-        predicted_id = np.argmax(predicted_batch, axis=-1)
-        predicted_label_batch = class_names[predicted_id]
+    class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
+    class_names = np.array([key.title() for key, value in class_names])
+    print(class_names)
+    predicted_batch = model.predict(image_batch)
+    predicted_id = np.argmax(predicted_batch, axis=-1)
+    predicted_label_batch = class_names[predicted_id]
 
-        label_id = np.argmax(label_batch, axis=-1)
-        plt.figure(figsize=(10, 9))
-        plt.subplots_adjust(hspace=0.5)
-        for n in range(30):
-            plt.subplot(6, 5, n + 1)
-            plt.imshow(image_batch[n])
-            color = 'green' if predicted_id[n] == label_id[n] else 'red'
-            plt.title(predicted_label_batch[n].title() + ", " + class_names[label_id[n]], color=color)
-            plt.axis('off')
-        _ = plt.suptitle('Model predictions (green: correct, red: incorrect)')
-        plt.show()
+    label_id = np.argmax(label_batch, axis=-1)
+    plt.figure(figsize=(10, 9))
+    plt.subplots_adjust(hspace=0.5)
+    for n in range(30):
+        plt.subplot(6, 5, n + 1)
+        plt.imshow(image_batch[n])
+        color = 'green' if predicted_id[n] == label_id[n] else 'red'
+        plt.title(predicted_label_batch[n].title(), color=color)
+        plt.axis('off')
+    _ = plt.suptitle('Model predictions (green: correct, red: incorrect)')
+    plt.show()
+
+    image = tf.keras.preprocessing.image.load_img('7061-6-0-0.png', target_size=IMAGE_SHAPE)
+    np_image = np.array(image, dtype=float)
+    np_image = np.expand_dims(np_image, axis=0)
+    result = model.predict(np_image, batch_size=1)
     print(EXPORT_PATH)
