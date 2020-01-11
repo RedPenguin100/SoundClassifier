@@ -73,7 +73,8 @@ def load_labels(label_file):
 
 
 if __name__ == "__main__":
-  file_name = "spectrograms/air_conditioner/13230-0-0-1.wav.png"
+  # TODO: fix the path
+  file_name = "spectrogram-v2.0/air_conditioner/13230-0-0-1.wav.png"
   model_file = "retrained_graph.pb"
   label_file = "retrained_labels.txt"
   input_height = 299

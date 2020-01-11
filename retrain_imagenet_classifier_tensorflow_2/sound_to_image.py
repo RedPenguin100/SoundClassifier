@@ -11,6 +11,7 @@ count = -1
 URBAN_SOUND8K_PATH = os.path.join(os.path.pardir, 'UrbanSound8K')
 URBAN_SOUND8K_CSV_PATH = os.path.join(URBAN_SOUND8K_PATH, os.path.join('metadata', 'UrbanSound8K.csv'))
 AUDIO_PATH = os.path.join(URBAN_SOUND8K_PATH, 'audio')
+SPECTROGRAM_PATH = 'spectrogram-v2.0'
 
 
 def wav_to_spectogram(wav_path, spectogram_path):
@@ -34,7 +35,7 @@ def wav_to_spectogram(wav_path, spectogram_path):
     plt.close()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     with open(URBAN_SOUND8K_CSV_PATH) as csvfile:
         spamreader = csv.reader(csvfile, delimiter=',')
         for row in spamreader:
@@ -43,12 +44,12 @@ if __name__ == "__main__":
             if count == 0:
                 continue
 
-            print(count)
-            if not os.path.exists('spectrograms/' + row[7]):
-                os.makedirs('spectrograms/' + row[7])
+            wavfile_name = str(row[0])
+            fold = str(row[5])
+            label = str(row[7])
+            wavpath = os.path.join(AUDIO_PATH, 'fold' + fold) + os.path.sep + wavfile_name
 
-            spec_path = 'spectrograms/' + row[7] + '/' + row[0] + '.png'
-            audio_path = os.path.join(AUDIO_PATH, 'fold') + str(row[5]) + os.path.sep + str(row[0])
-
-            wav_to_spectogram(wav_path=audio_path, spectogram_path=spec_path)
+            spectrogram_path = os.path.join(SPECTROGRAM_PATH, label, wavfile_name + '.png')
+            os.makedirs(os.path.dirname(spectrogram_path), exist_ok=True)
+            wav_to_spectogram(wavpath, spectrogram_path)
             print(count)
