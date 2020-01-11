@@ -9,6 +9,15 @@ import sys
 import PIL.Image as Image
 
 from retrain_imagenet_classifier_tensorflow_2.sound_to_image import wav_to_spectogram
+def fix_gpu():
+    """
+    I don't fully understand this yet but these lines fix an error in CUDNN
+    """
+
+    config = tf.compat.v1.ConfigProto()
+    config.gpu_options.allow_growth = True
+    tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
+
 
 
 class CollectBatchStats(tf.keras.callbacks.Callback):
@@ -21,20 +30,11 @@ class CollectBatchStats(tf.keras.callbacks.Callback):
         self.batch_acc.append(logs['acc'])
         self.model.reset_metrics()
 
-
-def fix_gpu():
-    '''
-    I don't fully understand this yet but these lines fix an error in CUDNN
-    '''
-
-    config = tf.compat.v1.ConfigProto()
-    config.gpu_options.allow_growth = True
-    tf.compat.v1.keras.backend.set_session(tf.compat.v1.Session(config=config))
-
-
+DATASET_SIZE = 8732
 IMAGE_SHAPE = (224, 224)
-DATA_ROOT = r'D:\Working\SoundClassifier\retrain_imagenet_classifier\spectrograms'
-EXPORT_PATH = 'D:\\tmp\\saved_models\\spectogram'
+DATA_ROOT = r'spectrograms'
+EXPORT_PATH = 'C:\\tmp\\saved_models\\spectogram'
+FEATURE_EXTRACTOR_URL = 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'
 
 if __name__ == '__main__':
     if len(sys.argv) != 2:
@@ -42,21 +42,14 @@ if __name__ == '__main__':
     should_load = sys.argv[1] == 'load'
     fix_gpu()
 
-    # Audio to spectogram
-    wav_path = '..\\UrbanSound8K\\audio\\fold1\\7061-6-0-0.wav'
-    spectogram_path = '7061-6-0-0.png'
-    wav_to_spectogram(wav_path=wav_path, spectogram_path=spectogram_path)
-
     # Obtain data to memory.
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
-    image_data = image_generator.flow_from_directory(str(DATA_ROOT), target_size=IMAGE_SHAPE)
+    image_data = image_generator.flow_from_directory(str(DATA_ROOT), target_size=IMAGE_SHAPE, batch_size=12)
     image_batch, label_batch = image_data[0]
 
     # Now we want to retrain:
-    feature_extractor_url = 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'
-    feature_extractor_layer = hub.KerasLayer(feature_extractor_url,
+    feature_extractor_layer = hub.KerasLayer(FEATURE_EXTRACTOR_URL,
                                              input_shape=(224, 224, 3))
-    feature_batch = feature_extractor_layer(image_batch)
 
     feature_extractor_layer.trainable = False
 
@@ -75,8 +68,8 @@ if __name__ == '__main__':
         batch_stats_callback = CollectBatchStats()
 
         model.fit_generator(image_data, epochs=2,
-                                      steps_per_epoch=steps_per_epoch,
-                                      callbacks=[batch_stats_callback])
+                            steps_per_epoch=steps_per_epoch,
+                            callbacks=[batch_stats_callback])
         model.save(EXPORT_PATH, save_format='tf')
     else:
         model = tf.keras.models.load_model(EXPORT_PATH)
