@@ -30,10 +30,9 @@ def wav_to_spectogram(wav_path, spectogram_path):
     librosa.display.specshow(log_S, sr=rate, x_axis='time', y_axis='mel')
 
     # Make the figure layout compact
-
-    # plt.show()
     plt.savefig(spectogram_path)
     plt.close()
+
 
 if __name__ == "__main__":
     with open(URBAN_SOUND8K_CSV_PATH) as csvfile:
