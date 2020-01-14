@@ -3,13 +3,11 @@ import tensorflow as tf
 
 import tensorflow_hub as hub
 import pandas as pd
+from sklearn.metrics import confusion_matrix
 from tensorflow.keras import layers
-import time
 import numpy as np
 import sys
-import PIL.Image as Image
 import os
-import csv
 import logging
 from retrain_imagenet_classifier_tensorflow_2.sound_to_image import SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
 
@@ -25,7 +23,6 @@ CLASSES = ['air_conditioner', 'car_horn', 'children_playing',
 NUMBER_OF_CLASSES = len(CLASSES)
 
 EXPORT_PATH = 'C:\\tmp\\saved_models\\spectogram'
-EXPORT_PATH_10fold = 'C:\\tmp\\saved_models\\spectogram_10fold'
 FEATURE_EXTRACTOR_URL = 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'
 
 
@@ -62,11 +59,10 @@ def wavfile_to_spectrogram_path(wavfile):
     return os.path.join(os.path.abspath(SPECTROGRAM_PATH), wavfile) + '.png'
 
 
-def get_image_train_data(spectrogram_path, split=None):
+def get_image_train_data(split, batch_size=32):
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
     df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
-    if split is not None:
-        df = df[df['fold'] != split]
+    df = df[df['fold'] != split]
     df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
     image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
@@ -80,6 +76,19 @@ def get_image_test_data(spectrogram_path, fold, batch_size=32):
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
     df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
     df = df[df['fold'] == fold].copy()
+    df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
+    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
+                                                     x_col='slice_file_name',
+                                                     y_col='class',
+                                                     shuffle=False,
+                                                     target_size=IMAGE_SHAPE, batch_size=batch_size,
+                                                     follow_links=True)
+    return image_data
+
+
+def get_all_data(batch_size=32):
+    image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
+    df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
     df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
     image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
@@ -100,39 +109,65 @@ class CollectBatchStats(tf.keras.callbacks.Callback):
         self.model.reset_metrics()
 
 
+def get_nth_image(image_data, n):
+    batch_num = n // image_data.batch_size
+    within_batch_index = n % image_data.batch_size
+    return image_data[batch_num][0][within_batch_index]
+
+
+def get_nth_label(image_data, n):
+    batch_num = n // image_data.batch_size
+    within_batch_index = n % image_data.batch_size
+    return np.argmax(image_data[batch_num][1][within_batch_index])
+
+
+def print_confusion_matrix(model, image_data):
+    predicted_labels = np.argmax(model.predict_generator(image_data), axis=1)
+    print(confusion_matrix(image_data.classes, predicted_labels))
+
+
+def plot_next_n_errors(model, image_data, n):
+    class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
+    class_names = np.array([key.title() for key, value in class_names])
+
+    print(class_names)
+    predicted_labels = model.predict_generator(image_data)
+    predicted_labels_id = np.argmax(predicted_labels, axis=-1)
+    predicted_labels_pictures_names = class_names[predicted_labels_id]
+    mislabeled_indices = np.where(predicted_labels_id != image_data.classes)[0]
+    plt.figure(figsize=(10, 9))
+    plt.subplots_adjust(hspace=0.5)
+
+    for n in range(min(30, len(mislabeled_indices))):
+        plt.subplot(6, 5, n + 1)
+        plt.imshow(get_nth_image(image_data, mislabeled_indices[n]))
+        # color = 'green' if predicted_labels_id[n] == wanted_id else 'red'
+        color = 'red'
+        plt.title('predicted: ' + predicted_labels_pictures_names[mislabeled_indices[n]].title() + '\n actual: '
+                  + class_names[get_nth_label(image_data, mislabeled_indices[n])], color=color)
+        plt.axis('off')
+    plt.show()
+
+
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        raise ValueError('Usage: {} load/train/10fold'.format(sys.argv[0]))
+    if len(sys.argv) != 2:
+        raise ValueError('Usage: {} load/train'.format(sys.argv[0]))
     first_argument = sys.argv[1]
     should_load_10fold = should_load = should_train = should_10fold = False
     if first_argument == 'load':
         should_load = True
     elif first_argument == 'train':
         should_train = True
-    elif first_argument == '10fold':
-        should_10fold = True
     else:
         raise ValueError('Bad parameter given')
 
     fix_gpu()
 
-    # Obtain data to memory.
-    batch_size = 12  # TODO: configurable batch size. This is small because of a weaker machine.
+    batch_size = 32  # TODO: configurable batch size.
 
     if should_train:
-        image_data = get_image_train_data(SPECTROGRAM_PATH)
-        model = create_model(num_classes=NUMBER_OF_CLASSES)
-        steps_per_epoch = np.ceil(image_data.samples / batch_size)
-
-        batch_stats_callback = CollectBatchStats()
-
-        model.fit_generator(image_data, epochs=2,
-                            steps_per_epoch=steps_per_epoch,
-                            callbacks=[batch_stats_callback])
-        model.save(EXPORT_PATH, save_format='tf')
-    elif should_10fold:
         for split_num in range(1, 11):
-            image_data = get_image_train_data(SPECTROGRAM_PATH, split=split_num)
+            image_data = get_image_train_data(split=split_num)
             model = create_model(num_classes=NUMBER_OF_CLASSES)
             steps_per_epoch = np.ceil(image_data.samples / batch_size)
 
@@ -146,34 +181,12 @@ if __name__ == '__main__':
             # logging.debug('The result of split: {split} is {result}'.format(split=split_num,
             #                                                                 result=result))
     elif should_load:
-        image_data = get_image_train_data(SPECTROGRAM_PATH)
-        model = tf.keras.models.load_model(EXPORT_PATH)
+        for split in range(1, 11):
+            image_data = get_image_test_data(SPECTROGRAM_PATH, split)
+            model = tf.keras.models.load_model(EXPORT_PATH + str(split) + 'split')
+            print_confusion_matrix(model, image_data)
+
     else:
         raise RuntimeError('Unreachable flow reached')
 
-    image_batch, label_batch = image_data[0]
-
-    class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
-    class_names = np.array([key.title() for key, value in class_names])
-    print(class_names)
-    predicted_batch = model.predict(image_batch)
-    predicted_id = np.argmax(predicted_batch, axis=-1)
-    predicted_label_batch = class_names[predicted_id]
-
-    label_id = np.argmax(label_batch, axis=-1)
-    plt.figure(figsize=(10, 9))
-    plt.subplots_adjust(hspace=0.5)
-    for n in range(min(30, batch_size)):
-        plt.subplot(6, 5, n + 1)
-        plt.imshow(image_batch[n])
-        color = 'green' if predicted_id[n] == label_id[n] else 'red'
-        plt.title(predicted_label_batch[n].title(), color=color)
-        plt.axis('off')
-    _ = plt.suptitle('Model predictions (green: correct, red: incorrect)')
-    plt.show()
-
-    # How to predict for 1 picture
-    # image = tf.keras.preprocessing.image.load_img('7061-6-0-0.png', target_size=IMAGE_SHAPE)
-    # np_image = np.array(image, dtype=float)
-    # np_image = np.expand_dims(np_image, axis=0)
-    # result = model.predict(np_image, batch_size=1)
+    plot_next_n_errors(model, image_data, 30)
