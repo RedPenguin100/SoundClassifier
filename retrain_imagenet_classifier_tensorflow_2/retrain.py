@@ -1,16 +1,14 @@
+import numpy as np
+import sys
+import os
+import logging
+
 import matplotlib.pylab as plt
 import tensorflow as tf
-
 import tensorflow_hub as hub
 import pandas as pd
 from tensorflow.keras import layers
-import time
-import numpy as np
-import sys
-import PIL.Image as Image
-import os
-import csv
-import logging
+
 from retrain_imagenet_classifier_tensorflow_2.sound_to_image import SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
 
 tf.get_logger().setLevel('ERROR')
@@ -153,7 +151,7 @@ if __name__ == '__main__':
     fix_gpu()
 
     # Obtain data to memory.
-    batch_size = 12  # TODO: configurable batch size. This is small because of a weaker machine.
+    batch_size = 8  # TODO: configurable batch size. This is small because of a weaker machine.
     # if should_create_hierarchy:
     #     try:
     #         create_sym_hierarchy(SPECTROGRAM_PATH)
