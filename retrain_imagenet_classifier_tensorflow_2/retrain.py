@@ -7,7 +7,13 @@ import matplotlib.pylab as plt
 import tensorflow as tf
 import tensorflow_hub as hub
 import pandas as pd
+from sklearn.metrics import confusion_matrix
 from tensorflow.keras import layers
+import numpy as np
+import sys
+import os
+import logging
+from retrain_imagenet_classifier_tensorflow_2.sound_to_image import SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
 
 from retrain_imagenet_classifier_tensorflow_2.configuration import Configuration
 from retrain_imagenet_classifier_tensorflow_2.sound_to_image import DEFAULT_SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
@@ -24,9 +30,7 @@ CLASSES = ['air_conditioner', 'car_horn', 'children_playing',
 NUMBER_OF_CLASSES = len(CLASSES)
 
 EXPORT_PATH = 'C:\\tmp\\saved_models\\spectogram'
-EXPORT_PATH_10fold = 'C:\\tmp\\saved_models\\spectogram_10fold'
 FEATURE_EXTRACTOR_URL = 'https://tfhub.dev/google/tf2-preview/mobilenet_v2/feature_vector/2'
-SYMBOLIC_HIERARCHY = "spectrogram-sym"
 
 
 def create_model(num_classes, verbose=False):
@@ -62,11 +66,10 @@ def wavfile_to_spectrogram_path(wavfile):
     return os.path.join(os.path.abspath(DEFAULT_SPECTROGRAM_PATH), wavfile) + '.png'
 
 
-def get_image_train_data(spectrogram_path, split=None):
+def get_image_train_data(split, batch_size=32):
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
     df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
-    if split is not None:
-        df = df[df['fold'] != split]
+    df = df[df['fold'] != split]
     df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
     image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(DEFAULT_SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
@@ -76,7 +79,7 @@ def get_image_train_data(spectrogram_path, split=None):
     return image_data
 
 
-def get_image_test_data(spectrogram_path, fold):
+def get_image_test_data(spectrogram_path, fold, batch_size=32):
     image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
     df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
     df = df[df['fold'] == fold].copy()
@@ -84,38 +87,23 @@ def get_image_test_data(spectrogram_path, fold):
     image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(DEFAULT_SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
                                                      y_col='class',
+                                                     shuffle=False,
+                                                     target_size=IMAGE_SHAPE, batch_size=batch_size,
                                                      target_size=IMAGE_SHAPE, batch_size=configuration.batch_size,
                                                      follow_links=True)
     return image_data
 
 
-def create_sym_hierarchy(spectrogram_path):
-    for split in range(1, 11):
-        split_folder_name = str(split) + 'split'
-        split_path = os.path.join(SYMBOLIC_HIERARCHY, split_folder_name)
-        os.makedirs(split_path, exist_ok=True)
-        training_folder = 'training'
-        training_path = os.path.join(split_path, training_folder)
-        testing_folder = 'testing'
-        testing_path = os.path.join(split_path, testing_folder)
-        os.makedirs(training_path, exist_ok=True)
-        os.makedirs(testing_path, exist_ok=True)
-        for class_name in CLASSES:
-            os.makedirs(os.path.join(training_path, class_name), exist_ok=True)
-            os.makedirs(os.path.join(testing_path, class_name), exist_ok=True)
-        # TODO: Keep implementing or delete.
-
-        # for fold in range(1, 11):
-        #     if split != fold:
-        #         # Create training symlinks
-        #         os.symlink(os.path.join(os.path.abspath(spectrogram_path), str(split)),
-        #                    os.path.join(split_path, training_folder, str(fold)),
-        #                    target_is_directory=True)
-        #     else:
-        #         # Create the testing symlink
-        #         os.symlink(os.path.join(os.path.abspath(spectrogram_path), str(split)),
-        #                    os.path.join(split_path, testing_folder, str(split)),
-        #                    target_is_directory=True)
+def get_all_data(batch_size=32):
+    image_generator = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1 / 255)
+    df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
+    df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
+    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
+                                                     x_col='slice_file_name',
+                                                     y_col='class',
+                                                     target_size=IMAGE_SHAPE, batch_size=batch_size,
+                                                     follow_links=True)
+    return image_data
 
 
 class CollectBatchStats(tf.keras.callbacks.Callback):
@@ -129,6 +117,46 @@ class CollectBatchStats(tf.keras.callbacks.Callback):
         self.model.reset_metrics()
 
 
+def get_nth_image(image_data, n):
+    batch_num = n // image_data.batch_size
+    within_batch_index = n % image_data.batch_size
+    return image_data[batch_num][0][within_batch_index]
+
+
+def get_nth_label(image_data, n):
+    batch_num = n // image_data.batch_size
+    within_batch_index = n % image_data.batch_size
+    return np.argmax(image_data[batch_num][1][within_batch_index])
+
+
+def print_confusion_matrix(model, image_data):
+    predicted_labels = np.argmax(model.predict_generator(image_data), axis=1)
+    print(confusion_matrix(image_data.classes, predicted_labels))
+
+
+def plot_next_n_errors(model, image_data, n):
+    class_names = sorted(image_data.class_indices.items(), key=lambda pair: pair[1])
+    class_names = np.array([key.title() for key, value in class_names])
+
+    print(class_names)
+    predicted_labels = model.predict_generator(image_data)
+    predicted_labels_id = np.argmax(predicted_labels, axis=-1)
+    predicted_labels_pictures_names = class_names[predicted_labels_id]
+    mislabeled_indices = np.where(predicted_labels_id != image_data.classes)[0]
+    plt.figure(figsize=(10, 9))
+    plt.subplots_adjust(hspace=0.5)
+
+    for n in range(min(30, len(mislabeled_indices))):
+        plt.subplot(6, 5, n + 1)
+        plt.imshow(get_nth_image(image_data, mislabeled_indices[n]))
+        # color = 'green' if predicted_labels_id[n] == wanted_id else 'red'
+        color = 'red'
+        plt.title('predicted: ' + predicted_labels_pictures_names[mislabeled_indices[n]].title() + '\n actual: '
+                  + class_names[get_nth_label(image_data, mislabeled_indices[n])], color=color)
+        plt.axis('off')
+    plt.show()
+
+
 if __name__ == '__main__':
     if len(sys.argv) != 3:
         raise ValueError('Usage: {} load/train/10fold should_create_hierarchy'.format(sys.argv[0]))
@@ -139,17 +167,9 @@ if __name__ == '__main__':
         should_load = True
     elif first_argument == 'train':
         should_train = True
-    elif first_argument == '10fold':
-        should_10fold = True
     else:
         raise ValueError('Bad parameter given')
 
-    second_argument = sys.argv[2]
-    should_create_hierarchy = False
-    if str.lower(second_argument) == 'true':
-        should_create_hierarchy = True
-    elif str.lower(second_argument) != 'false':
-        raise ValueError('Bad parameter given')
     fix_gpu()
 
     # Obtain data to memory.
@@ -165,13 +185,7 @@ if __name__ == '__main__':
         model = create_model(num_classes=NUMBER_OF_CLASSES)
         steps_per_epoch = np.ceil(image_data.samples / configuration.batch_size)
 
-        batch_stats_callback = CollectBatchStats()
-
-        model.fit_generator(image_data, epochs=2,
-                            steps_per_epoch=steps_per_epoch,
-                            callbacks=[batch_stats_callback])
-        model.save(EXPORT_PATH, save_format='tf')
-    elif should_10fold:
+    if should_train:
         for split_num in range(1, 11):
             image_data = get_image_train_data(DEFAULT_SPECTROGRAM_PATH, split=split_num)
             model = create_model(num_classes=NUMBER_OF_CLASSES)
