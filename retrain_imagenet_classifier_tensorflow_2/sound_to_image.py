@@ -7,14 +7,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import librosa.display
 
-count = -1
 URBAN_SOUND8K_PATH = os.path.join(os.path.pardir, 'UrbanSound8K')
 URBAN_SOUND8K_CSV_PATH = os.path.join(URBAN_SOUND8K_PATH, os.path.join('metadata', 'UrbanSound8K.csv'))
 AUDIO_PATH = os.path.join(URBAN_SOUND8K_PATH, 'audio')
-SPECTROGRAM_PATH = 'spectrogram-v2.0'
+DEFAULT_SPECTROGRAM_PATH = 'spectrogram'
 
 
-def wav_to_spectogram(wav_path, spectogram_path):
+def wav_to_spectrogram(wav_path, spectrogram_path):
     frames, rate = librosa.load(wav_path)
     S = librosa.feature.melspectrogram(frames, sr=rate, n_mels=128)
 
@@ -31,16 +30,14 @@ def wav_to_spectogram(wav_path, spectogram_path):
     librosa.display.specshow(log_S, sr=rate, x_axis='time', y_axis='mel')
 
     # Make the figure layout compact
-    plt.savefig(spectogram_path)
+    plt.savefig(spectrogram_path)
     plt.close()
 
 
 if __name__ == '__main__':
     with open(URBAN_SOUND8K_CSV_PATH) as csvfile:
         spamreader = csv.reader(csvfile, delimiter=',')
-        for row in spamreader:
-            count += 1
-
+        for count, row in enumerate(spamreader):
             if count == 0:
                 continue
 
@@ -49,7 +46,7 @@ if __name__ == '__main__':
             label = str(row[7])
             wavpath = os.path.join(AUDIO_PATH, 'fold' + fold) + os.path.sep + wavfile_name
 
-            spectrogram_path = os.path.join(SPECTROGRAM_PATH, label, wavfile_name + '.png')
+            spectrogram_path = os.path.join(DEFAULT_SPECTROGRAM_PATH, label, wavfile_name + '.png')
             os.makedirs(os.path.dirname(spectrogram_path), exist_ok=True)
-            wav_to_spectogram(wavpath, spectrogram_path)
+            wav_to_spectrogram(wavpath, spectrogram_path=spectrogram_path)
             print(count)

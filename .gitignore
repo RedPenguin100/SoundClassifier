@@ -136,3 +136,6 @@ UrbanSound8K/
 # Product files for model
 retrain_imagenet_classifier/spectrograms/
 retrain_imagenet_classifier_tensorflow_2/spectrograms/
+*.png
+
+retrain_imagenet_classifier_tensorflow_2/log.txt

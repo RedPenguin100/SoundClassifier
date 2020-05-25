@@ -9,7 +9,8 @@ import tensorflow_hub as hub
 import pandas as pd
 from tensorflow.keras import layers
 
-from retrain_imagenet_classifier_tensorflow_2.sound_to_image import SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
+from retrain_imagenet_classifier_tensorflow_2.configuration import Configuration
+from retrain_imagenet_classifier_tensorflow_2.sound_to_image import DEFAULT_SPECTROGRAM_PATH, URBAN_SOUND8K_CSV_PATH, AUDIO_PATH
 
 tf.get_logger().setLevel('ERROR')
 logging.getLogger('PIL').setLevel(logging.INFO)
@@ -58,7 +59,7 @@ def fix_gpu():
 
 
 def wavfile_to_spectrogram_path(wavfile):
-    return os.path.join(os.path.abspath(SPECTROGRAM_PATH), wavfile) + '.png'
+    return os.path.join(os.path.abspath(DEFAULT_SPECTROGRAM_PATH), wavfile) + '.png'
 
 
 def get_image_train_data(spectrogram_path, split=None):
@@ -67,10 +68,10 @@ def get_image_train_data(spectrogram_path, split=None):
     if split is not None:
         df = df[df['fold'] != split]
     df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
-    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
+    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(DEFAULT_SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
                                                      y_col='class',
-                                                     target_size=IMAGE_SHAPE, batch_size=batch_size,
+                                                     target_size=IMAGE_SHAPE, batch_size=configuration.batch_size,
                                                      follow_links=True)
     return image_data
 
@@ -80,10 +81,10 @@ def get_image_test_data(spectrogram_path, fold):
     df = pd.read_csv(URBAN_SOUND8K_CSV_PATH)
     df = df[df['fold'] == fold].copy()
     df.loc[:, ('slice_file_name')] = df.loc[:, ('slice_file_name')].apply(wavfile_to_spectrogram_path)
-    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(SPECTROGRAM_PATH),
+    image_data = image_generator.flow_from_dataframe(df, directory=os.path.abspath(DEFAULT_SPECTROGRAM_PATH),
                                                      x_col='slice_file_name',
                                                      y_col='class',
-                                                     target_size=IMAGE_SHAPE, batch_size=batch_size,
+                                                     target_size=IMAGE_SHAPE, batch_size=configuration.batch_size,
                                                      follow_links=True)
     return image_data
 
@@ -131,6 +132,7 @@ class CollectBatchStats(tf.keras.callbacks.Callback):
 if __name__ == '__main__':
     if len(sys.argv) != 3:
         raise ValueError('Usage: {} load/train/10fold should_create_hierarchy'.format(sys.argv[0]))
+    configuration = Configuration()
     first_argument = sys.argv[1]
     should_load_10fold = should_load = should_train = should_10fold = False
     if first_argument == 'load':
@@ -151,7 +153,6 @@ if __name__ == '__main__':
     fix_gpu()
 
     # Obtain data to memory.
-    batch_size = 8  # TODO: configurable batch size. This is small because of a weaker machine.
     # if should_create_hierarchy:
     #     try:
     #         create_sym_hierarchy(SPECTROGRAM_PATH)
@@ -160,9 +161,9 @@ if __name__ == '__main__':
     #                            'Please delete the hierarchy and try again.')
     #
     if should_train:
-        image_data = get_image_train_data(SPECTROGRAM_PATH)
+        image_data = get_image_train_data(DEFAULT_SPECTROGRAM_PATH)
         model = create_model(num_classes=NUMBER_OF_CLASSES)
-        steps_per_epoch = np.ceil(image_data.samples / batch_size)
+        steps_per_epoch = np.ceil(image_data.samples / configuration.batch_size)
 
         batch_stats_callback = CollectBatchStats()
 
@@ -172,9 +173,9 @@ if __name__ == '__main__':
         model.save(EXPORT_PATH, save_format='tf')
     elif should_10fold:
         for split_num in range(1, 11):
-            image_data = get_image_train_data(SPECTROGRAM_PATH, split=split_num)
+            image_data = get_image_train_data(DEFAULT_SPECTROGRAM_PATH, split=split_num)
             model = create_model(num_classes=NUMBER_OF_CLASSES)
-            steps_per_epoch = np.ceil(image_data.samples / batch_size)
+            steps_per_epoch = np.ceil(image_data.samples / configuration.batch_size)
 
             batch_stats_callback = CollectBatchStats()
 
@@ -186,7 +187,7 @@ if __name__ == '__main__':
             # logging.debug('The result of split: {split} is {result}'.format(split=split_num,
             #                                                                 result=result))
     elif should_load:
-        image_data = get_image_train_data(SPECTROGRAM_PATH)
+        image_data = get_image_train_data(DEFAULT_SPECTROGRAM_PATH)
         model = tf.keras.models.load_model(EXPORT_PATH)
     else:
         raise RuntimeError('Unreachable flow reached')
@@ -203,7 +204,7 @@ if __name__ == '__main__':
     label_id = np.argmax(label_batch, axis=-1)
     plt.figure(figsize=(10, 9))
     plt.subplots_adjust(hspace=0.5)
-    for n in range(min(30, batch_size)):
+    for n in range(min(30, configuration.batch_size)):
         plt.subplot(6, 5, n + 1)
         plt.imshow(image_batch[n])
         color = 'green' if predicted_id[n] == label_id[n] else 'red'
